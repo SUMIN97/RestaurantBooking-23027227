@@ -1,23 +1,38 @@
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import Mock, patch
 
 from booking_scheduler import BookingScheduler
-from communication_test import TestableSmsSender, TestableMailSender
 from schedule import Customer, Schedule
 
 NOT_ON_THE_HOUR = datetime.strptime("2024/07/11 09:05", "%Y/%m/%d %H:%M")
 ON_THE_HOUR = datetime.strptime("2024/07/11 09:00", "%Y/%m/%d %H:%M")
-CUSTOMER = Customer("Fake name", "010-1234-5678")
+CUSTOMER  = Mock()
+CUSTOMER.get_email.return_value = None
+CUSTOMER_WITH_MAIL = Mock()
+CUSTOMER_WITH_MAIL.get_email.return_value = 'test@test.com'
 
 UNDER_CAPACITY = 1
 CAPACITY_PER_HOUR = 3
 
+class TestableBookgingScheduler(BookingScheduler):
+    def __init__(self, capacity_per_hour, date_time: str):
+        super().__init__(capacity_per_hour)
+        self._date_time = date_time
+
+    def get_now(self):
+        return datetime.strptime(self._date_time, "%Y/%m/%d %H:%M")
+
+
 class BookingSchedulerTest(unittest.TestCase):
 
     def setUp(self):
-        self.booking_scheduler = BookingScheduler(CAPACITY_PER_HOUR)
-        self.testable_sms_sender = TestableSmsSender()
-        self.booking_scheduler.set_sms_sender(self.testable_sms_sender)
+        self.booking_scheduler = TestableBookgingScheduler(CAPACITY_PER_HOUR, "2024/07/11 09:00")
+        self.sms_sender = Mock()
+        self.booking_scheduler.set_sms_sender(self.sms_sender)
+        self.mail_sender = Mock()
+        self.booking_scheduler.set_mail_sender(self.mail_sender)
+
 
     def test_예약은_정시에만_가능하다_정시가_아닌경우_예약불가(self):
         # arrange
@@ -71,38 +86,56 @@ class BookingSchedulerTest(unittest.TestCase):
         self.booking_scheduler.add_schedule(schedule)
 
         # assert
-        self.assertTrue(self.testable_sms_sender.is_send_method_is_called())
+        # self.assertTrue(self.testable_sms_sender.is_send_method_is_called())
+        self.sms_sender.send.assert_called()
 
     def test_이메일이_없는_경우에는_이메일_미발송(self):
         # arange
-        testable_mail_sender = TestableMailSender()
         schedule = Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER)
-        self.booking_scheduler.set_mail_sender(testable_mail_sender)
 
         # act
         self.booking_scheduler.add_schedule(schedule)
 
         # assert
-        self.assertEqual(testable_mail_sender.get_count_send_mail_is_called(), 0)
+        # self.assertEqual(self.testable_mail_sender.get_count_send_mail_is_called(), 0)
+        self.mail_sender.send_email.assert_not_called()
 
     def test_이메일이_있는_경우에는_이메일_발송(self):
         # arrange
-        customer_with_mail = Customer("Fake Name", '010-1234-5678', 'test@test.com')
-        testable_mail_sender = TestableMailSender()
-        schedule = Schedule(ON_THE_HOUR, UNDER_CAPACITY, customer_with_mail)
-        self.booking_scheduler.set_mail_sender(testable_mail_sender)
+
+        schedule = Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_MAIL)
 
         #act
         self.booking_scheduler.add_schedule(schedule)
 
         # assert
-        self.assertEqual(testable_mail_sender.get_count_send_mail_is_called(), 1)
+        # self.assertEqual(self.testable_mail_sender.get_count_send_mail_is_called(), 1)
+        self.mail_sender.send_mail.assert_called_once()
 
-    def test_현재날짜가_일요일인_경우_예약불가_예외처리(self):
-        pass
+    @patch.object(BookingScheduler, 'get_now', return_value=datetime.strptime("2024/07/07 13:00", "%Y/%m/%d %H:%M"))
+    def test_현재날짜가_일요일인_경우_예약불가_예외처리(self, mock):
+        # arrange
+        self.booking_scheduler = BookingScheduler(CAPACITY_PER_HOUR)
 
-    def test_현재날짜가_일요일이_아닌경우_예약가능(self):
-        pass
+        # act and assert
+        with self.assertRaises(ValueError):
+            new_shedule = Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_MAIL)
+            self.booking_scheduler.add_schedule(new_shedule)
+            self.fail()
+
+
+
+    @patch.object(BookingScheduler, 'get_now', return_value=datetime.strptime("2024/07/08 13:00", "%Y/%m/%d %H:%M"))
+    def test_현재날짜가_일요일이_아닌경우_예약가능(self, mock):
+        # arrange
+        self.booking_scheduler = BookingScheduler(CAPACITY_PER_HOUR)
+
+        # act and assert
+        new_shedule = Schedule(ON_THE_HOUR, UNDER_CAPACITY, CUSTOMER_WITH_MAIL)
+        self.booking_scheduler.add_schedule(new_shedule)
+
+        # assert
+        self.assertTrue(self.booking_scheduler.has_schedule(new_shedule))
 
 
 if __name__ == '__main__':
