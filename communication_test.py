@@ -7,3 +7,4 @@ class TestableSmsSender(SmsSender):
 
     def is_send_method_is_called(self):
         return self.__send_method_is_called
+
